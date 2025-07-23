@@ -19,14 +19,14 @@ While webcam support is not implemented in this project, it can be easily achiev
 
 ## Performance
 
-Tested on **Mac Mini M4 Pro (24GB RAM)**
+Tested on **Mac Mini M4 Pro (24GB RAM)** with **1920x1080 video**
 - Unity Version: 6000.0.37f1
 - Sentis Version: 2.1.3
 
 | Model | Performance |
 |-------|-------------|
-| rvm_mobilenetv3_fp32.onnx | 60-70 FPS |
-| rvm_resnet50_fp32.onnx | 30-40 FPS |
+| rvm_mobilenetv3_fp32.onnx | 70~ FPS |
+| rvm_resnet50_fp32.onnx | 40~ FPS |
 
 ## Setup
 
