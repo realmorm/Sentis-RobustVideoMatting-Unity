@@ -1,0 +1,84 @@
+#pragma kernel OrInt OR SUFFIX=OrInt
+#pragma kernel AndInt AND SUFFIX=AndInt
+#pragma kernel XorInt XOR SUFFIX=XorInt
+
+#pragma kernel IsInf
+
+#include "Tensor.cginc"
+
+int shapeO[8];
+int stridesO[8];
+int shapeA[8];
+int stridesA[8];
+int shapeB[8];
+int stridesB[8];
+uint2 unrolledDispatchArgs;
+int rank;
+bool detectNegative;
+bool detectPositive;
+
+StructuredBuffer<int> Xptr;
+StructuredBuffer<int> Bptr;
+RWStructuredBuffer<int> Optr;
+
+inline int CompareOp(int x, int y)
+{
+#ifdef OR
+    return x | y;
+#endif
+#ifdef AND
+    return x & y;
+#endif
+#ifdef XOR
+    return x ^ y;
+#endif
+    return 0;
+}
+
+[numthreads(64, 1, 1)]
+void SUFFIX(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    uint threadIdx = unrolledDispatchArgs.x * dispatchThreadID.y + dispatchThreadID.x;
+    if (threadIdx < unrolledDispatchArgs.y)
+    {
+        int sIdx = 0;
+        int tmp;
+
+        int indexA = 0;
+        int indexB = 0;
+        int axis = 0;
+        int limit = (rank - 1);
+
+        for (axis = 0; axis <= limit; axis++)
+        {
+            sIdx = (SHAPE_MAXRANK - 1) - axis;
+            tmp = ((threadIdx / stridesO[sIdx]) % shapeO[sIdx]);
+
+            indexA = indexA + (tmp % shapeA[sIdx]) * stridesA[sIdx];
+            indexB = indexB + (tmp % shapeB[sIdx]) * stridesB[sIdx];
+        }
+
+        int x = Xptr[indexA];
+        int y = Bptr[indexB];
+
+        Optr[threadIdx] = CompareOp(x, y);
+    }
+}
+
+#define TILE_DIM 256
+
+StructuredBuffer<float> X_float_ptr;
+
+[numthreads(TILE_DIM, 1, 1)]
+void IsInf(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupThreadID : SV_GroupThreadID, uint threadIndex : SV_GroupIndex, uint3 groupID : SV_GroupID)
+{
+    uint groupLengthX = unrolledDispatchArgs.x;
+    uint totalLength = unrolledDispatchArgs.y;
+
+    uint ti = threadIndex + TILE_DIM * (groupID.x + groupID.y * groupLengthX);
+    if (ti >= totalLength)
+        return;
+
+    float v = X_float_ptr[ti];
+    Optr[ti] = isinf(v) && ((v > 0 && detectPositive) || (v < 0 && detectNegative)) ? 1 : 0;
+}

@@ -1,0 +1,16 @@
+Library/
+Temp/
+Obj/
+Builds/
+Logs/
+UserSettings/
+.vscode/
+Assets/Models/
+
+.vs
+.idea
+
+*.sln
+*.csproj
+*.tmp
+*.log

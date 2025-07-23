@@ -1,0 +1,225 @@
+#pragma kernel Split
+#pragma kernel Tril
+#pragma kernel Triu
+#pragma kernel MemCopy
+#pragma kernel MemCopyStride
+#pragma kernel MemSet
+#pragma kernel Transpose2D
+#pragma kernel CastHalfToFloat
+#pragma kernel DequantizeUint8
+
+#define TILE_DIM 32
+#define BLOCK_ROWS 8
+
+#include "Tensor.cginc"
+
+StructuredBuffer<float> Xptr;
+RWStructuredBuffer<float> Optr;
+
+uint count;
+uint offsetO;
+uint offsetX;
+uint O_width;
+
+[numthreads(TILE_DIM * BLOCK_ROWS, 1, 1)]
+void MemCopy(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupThreadID : SV_GroupThreadID, uint threadIndex : SV_GroupIndex, uint3 groupID : SV_GroupID)
+{
+    uint z = groupID.x * TILE_DIM * TILE_DIM + groupID.y * O_width + groupThreadID.x;
+    uint4 z4 = uint4(0, 1, 2, 3) * BLOCK_ROWS * TILE_DIM + z;
+    uint4 o4 = offsetO + z4;
+    uint4 x4 = offsetX + z4;
+
+    if (z4.x < count)
+        Optr[o4.x] = Xptr[x4.x];
+    if (z4.y < count)
+        Optr[o4.y] = Xptr[x4.y];
+    if (z4.z < count)
+        Optr[o4.z] = Xptr[x4.z];
+    if (z4.w < count)
+        Optr[o4.w] = Xptr[x4.w];
+}
+
+uint elementSize;
+uint strideO;
+uint strideX;
+[numthreads(TILE_DIM * BLOCK_ROWS, 1, 1)]
+void MemCopyStride(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupThreadID : SV_GroupThreadID, uint threadIndex : SV_GroupIndex, uint3 groupID : SV_GroupID)
+{
+    uint z = groupID.x * TILE_DIM * TILE_DIM + groupThreadID.x;
+
+    uint4 z4 = uint4(0, 1, 2, 3) * BLOCK_ROWS * TILE_DIM + z;
+    uint4 elementGroup4 = z4 / elementSize;
+    uint4 elementIndex4 = z4 % elementSize;
+    uint4 o4 = strideO * elementGroup4 + offsetO + elementIndex4;
+    uint4 x4 = strideX * elementGroup4 + offsetX + elementIndex4;
+    if (z4.x < count)
+        Optr[o4.x] = Xptr[x4.x];
+    if (z4.y < count)
+        Optr[o4.y] = Xptr[x4.y];
+    if (z4.z < count)
+        Optr[o4.z] = Xptr[x4.z];
+    if (z4.w < count)
+        Optr[o4.w] = Xptr[x4.w];
+}
+
+float memValueFloat;
+
+[numthreads(TILE_DIM * BLOCK_ROWS, 1, 1)]
+void MemSet(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupThreadID : SV_GroupThreadID, uint threadIndex : SV_GroupIndex, uint3 groupID : SV_GroupID)
+{
+    uint x = groupID.x * TILE_DIM * TILE_DIM + groupID.y * O_width + groupThreadID.x;
+    uint4 x4 = x  + uint4(0, 1, 2, 3) * BLOCK_ROWS * TILE_DIM;
+    uint4 o4 = x4 + offsetO;
+
+    if (x4.x < count)
+        Optr[o4.x] = memValueFloat;
+    if (x4.y < count)
+        Optr[o4.y] = memValueFloat;
+    if (x4.z < count)
+        Optr[o4.z] = memValueFloat;
+    if (x4.w < count)
+        Optr[o4.w] = memValueFloat;
+}
+
+uint lengthO;
+uint start;
+uint strideLower;
+uint strideUpperX;
+uint strideUpperO;
+uint MaxBlockIndexX;
+
+[numthreads(64, 1, 1)]
+void Split(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    uint threadIdx = dispatchThreadID.y * MaxBlockIndexX + dispatchThreadID.x;
+    if (threadIdx >= lengthO)
+        return;
+    uint axisIndex = ((threadIdx % strideUpperO) / strideLower) + start;
+    uint xIdx = (threadIdx / strideUpperO) * strideUpperX +  axisIndex * strideLower + (threadIdx % strideLower);
+    float v = Xptr[xIdx];
+    Optr[threadIdx] = v;
+}
+
+uint X_width;
+uint X_height;
+uint X_length;
+int diagonalK;
+
+[numthreads(TILE_DIM * BLOCK_ROWS, 1, 1)]
+void Tril(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupThreadID : SV_GroupThreadID, uint threadIndex : SV_GroupIndex, uint3 groupID : SV_GroupID)
+{
+    uint z = groupID.x * TILE_DIM * TILE_DIM + groupThreadID.x;
+
+    uint4 z4 = uint4(0, 1, 2, 3) * BLOCK_ROWS * TILE_DIM + z;
+    int4 x4 = z4 % X_width;
+    int4 y4 = (z4 / X_width) % X_height;
+
+    if (z4.x < X_length)
+        Optr[z4.x] = (x4.x <= (y4.x + diagonalK)) ? Xptr[z4.x] : 0.0f;
+    if (z4.y < X_length)
+        Optr[z4.y] = (x4.y <= (y4.y + diagonalK)) ? Xptr[z4.y] : 0.0f;
+    if (z4.z < X_length)
+        Optr[z4.z] = (x4.z <= (y4.z + diagonalK)) ? Xptr[z4.z] : 0.0f;
+    if (z4.w < X_length)
+        Optr[z4.w] = (x4.w <= (y4.w + diagonalK)) ? Xptr[z4.w] : 0.0f;
+}
+
+[numthreads(TILE_DIM * BLOCK_ROWS, 1, 1)]
+void Triu(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupThreadID : SV_GroupThreadID, uint threadIndex : SV_GroupIndex, uint3 groupID : SV_GroupID)
+{
+    uint z = groupID.x * TILE_DIM * TILE_DIM + groupThreadID.x;
+
+    uint4 z4 = uint4(0, 1, 2, 3) * BLOCK_ROWS * TILE_DIM + z;
+    int4 x4 = z4 % X_width;
+    int4 y4 = (z4 / X_width) % X_height;
+
+    if (z4.x < X_length)
+        Optr[z4.x] = (x4.x >= (y4.x + diagonalK)) ? Xptr[z4.x] : 0.0f;
+    if (z4.y < X_length)
+        Optr[z4.y] = (x4.y >= (y4.y + diagonalK)) ? Xptr[z4.y] : 0.0f;
+    if (z4.z < X_length)
+        Optr[z4.z] = (x4.z >= (y4.z + diagonalK)) ? Xptr[z4.z] : 0.0f;
+    if (z4.w < X_length)
+        Optr[z4.w] = (x4.w >= (y4.w + diagonalK)) ? Xptr[z4.w] : 0.0f;
+}
+
+StructuredBuffer<int> XIntptr;
+RWStructuredBuffer<int> OIntptr;
+
+
+// https://developer.nvidia.com/blog/efficient-matrix-transpose-cuda-cc/
+#define BLOCK_DIM 16
+
+groupshared float LDS_BLOCK[BLOCK_DIM][BLOCK_DIM + 1];
+
+[numthreads(BLOCK_DIM, BLOCK_DIM, 1)]
+void Transpose2D(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupThreadID : SV_GroupThreadID, uint threadIndex : SV_GroupIndex, uint3 groupID : SV_GroupID)
+{
+    uint x = groupID.x * BLOCK_DIM + groupThreadID.x;
+    uint y = groupID.y * BLOCK_DIM + groupThreadID.y;
+
+    #if defined(SHADER_API_MOBILE)
+    LDS_BLOCK[groupThreadID.y][groupThreadID.x] = (x < X_width && y < X_height) ? Xptr[min(y * X_width + x, X_height * X_width - 1)] : 0.0f;
+    #else
+    LDS_BLOCK[groupThreadID.y][groupThreadID.x] = (x < X_width && y < X_height) ? Xptr[y * X_width + x] : 0.0f;
+    #endif
+
+    GroupMemoryBarrierWithGroupSync();
+
+    x = groupID.y * BLOCK_DIM + groupThreadID.x;
+    y = groupID.x * BLOCK_DIM + groupThreadID.y;
+
+    if (x < X_height && y < X_width)
+    {
+        Optr[y * X_height + x] = LDS_BLOCK[groupThreadID.x][groupThreadID.y];
+    }
+}
+
+uint2 unrolledDispatchArgs;
+
+[numthreads(64, 1, 1)]
+void CastHalfToFloat(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    uint threadIdx = unrolledDispatchArgs.x * dispatchThreadID.y + dispatchThreadID.x;
+    if (threadIdx >= unrolledDispatchArgs.y)
+        return;
+
+    uint v = XIntptr[threadIdx];
+    float v0 = f16tof32(v & 0x0000FFFF);
+    float v1 = f16tof32((v & 0xFFFF0000) >> 16);
+
+    // TODO LDS swizzle
+
+    if (2 * threadIdx + 0 < lengthO)
+        Optr[2 * threadIdx + 0] = v0;
+    if (2 * threadIdx + 1 < lengthO)
+        Optr[2 * threadIdx + 1] = v1;
+}
+
+float scale;
+int zeroPoint;
+
+[numthreads(64, 1, 1)]
+void DequantizeUint8(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    uint threadIdx = unrolledDispatchArgs.x * dispatchThreadID.y + dispatchThreadID.x;
+    if (threadIdx >= unrolledDispatchArgs.y)
+        return;
+
+    uint v = XIntptr[threadIdx];
+    float v0 = scale * (float)((int)(v & 0x000000FF) - zeroPoint);
+    float v1 = scale * (float)((int)((v & 0x0000FF00) >> 8) - zeroPoint);
+    float v2 = scale * (float)((int)((v & 0x00FF0000) >> 16) - zeroPoint);
+    float v3 = scale * (float)((int)((v & 0xFF000000) >> 24) - zeroPoint);
+
+    // TODO LDS swizzle
+
+    if (4 * threadIdx + 0 < lengthO)
+        Optr[4 * threadIdx + 0] = v0;
+    if (4 * threadIdx + 1 < lengthO)
+        Optr[4 * threadIdx + 1] = v1;
+    if (4 * threadIdx + 2 < lengthO)
+        Optr[4 * threadIdx + 2] = v2;
+    if (4 * threadIdx + 3 < lengthO)
+        Optr[4 * threadIdx + 3] = v3;
+}
