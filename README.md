@@ -15,7 +15,7 @@ A Unity implementation of Robust Video Matting using Unity Sentis to run ONNX mo
 
 ## Webcam Support
 
-The same approach can be used for webcam input by replacing the VideoPlayer with WebCamTexture and converting it to RenderTexture.
+While webcam support is not implemented in this project, it can be easily achieved by following the same approach as `VideoPlayerController.cs`. Simply feed the webcam texture to VideoMatting in a similar manner. The sample code is minimal and straightforward, making it easy to adapt for your own implementation.
 
 ## Performance
 
